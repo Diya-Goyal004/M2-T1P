@@ -1,113 +1,127 @@
 #include <iostream>
 #include <fstream>
-#include <random>
+#include <cstdlib> 
+#include <vector>
 #include <chrono>
 #include <pthread.h>
 
 using namespace std;
-using namespace std::chrono;
 
-const int MAX_SIZE = 100;
+// Size of the square matrices
+const int SQUARE_MATRIX_SIZE = 100; 
+// Number of threads for parallel computation
+const int NUM_THREADS = 2;    
 
-// Structure to hold data for each thread
-struct ThreadData {
-    int thread_id;
-    int N;
-    int (*A)[MAX_SIZE];
-    int (*B)[MAX_SIZE];
-    int (*C)[MAX_SIZE];
+// Struct to hold data for each thread
+struct MatrixThreadInfo {
+    // Pointer to matrix A
+    vector<vector<int>>* A; 
+    // Pointer to matrix B
+    vector<vector<int>>* B; 
+    // Pointer to result matrix C
+    vector<vector<int>>* C;  
+    // Index of the first row to compute
+    int firstRow; 
+    // Index of the last row to compute
+    int lastRow;              
 };
 
-// Function executed by each thread to perform matrix multiplication
-void* multiplyMatrices(void* arg) {
-    // Cast argument to ThreadData pointer
-    ThreadData* data = static_cast<ThreadData*>(arg);
+// Function to generate random values for a matrix
+void generateRandomMatrix(vector<vector<int>>& matrix) {
+    for (int row = 0; row < SQUARE_MATRIX_SIZE; ++row) {
+        for (int col = 0; col < SQUARE_MATRIX_SIZE; ++col) {
+            // Generating random numbers between 0 and 99
+            matrix[row][col] = rand() % 100; 
+        }
+    }
+}
 
-    // Determine the range of rows to be processed by this thread
-    int start_row = (data->thread_id * data->N) / 4;
-    int end_row = ((data->thread_id + 1) * data->N) / 4;
+// Function to display a matrix
+void displayMatrix(const vector<vector<int>>& matrix) {
+    for (int row = 0; row < SQUARE_MATRIX_SIZE; ++row) {
+        for (int col = 0; col < SQUARE_MATRIX_SIZE; ++col) {
+            cout << matrix[row][col] << " ";
+        }
+        cout << endl;
+    }
+}
 
-    // Perform matrix multiplication
-    for (int i = start_row; i < end_row; ++i) {
-        for (int j = 0; j < data->N; ++j) {
-            data->C[i][j] = 0;
-            for (int k = 0; k < data->N; ++k) {
-                data->C[i][j] += data->A[i][k] * data->B[k][j];
+// Function executed by each thread to compute dot products
+void* calculateDotProducts(void* arg) {
+    MatrixThreadInfo* data = static_cast<MatrixThreadInfo*>(arg);
+
+    // Loop through the assigned rows and compute dot products
+    for (int i = data->firstRow; i < data->lastRow; ++i) {
+        for (int j = 0; j < SQUARE_MATRIX_SIZE; ++j) {
+            for (int k = 0; k < SQUARE_MATRIX_SIZE; ++k) {
+                (*data->C)[i][j] += (*data->A)[i][k] * (*data->B)[k][j];
             }
         }
     }
 
-    // Exit the thread
-    pthread_exit(nullptr);
+    return nullptr;
 }
 
 int main() {
-    // Random number generation
-    random_device rd;
-    mt19937 gen(rd());
-    uniform_int_distribution<> dis(0, 9);
+    // Initialize matrices A, B, and C
+    vector<vector<int>> A(SQUARE_MATRIX_SIZE, vector<int>(SQUARE_MATRIX_SIZE));
+    vector<vector<int>> B(SQUARE_MATRIX_SIZE, vector<int>(SQUARE_MATRIX_SIZE));
+    vector<vector<int>> C(SQUARE_MATRIX_SIZE, vector<int>(SQUARE_MATRIX_SIZE, 0)); // Initialize C with zeros
 
-    int N;
-    cout << "Enter the size of the matrices (N): ";
-    cin >> N;
+    // Generate random values for matrices A and B
+    generateRandomMatrix(A);
+    generateRandomMatrix(B);
 
-    // Validate matrix size
-    if (N <= 0 || N > MAX_SIZE) {
-        cout << "Invalid size entered!";
-        return 1;
+    // Display matrices A and B
+    cout << "Matrix A:" << endl;
+    displayMatrix(A);
+    cout << endl << "Matrix B:" << endl;
+    displayMatrix(B);
+
+    // Start timing the matrix multiplication process
+    auto start = chrono::high_resolution_clock::now();
+
+    // Initialize pthread variables
+    pthread_t threads[NUM_THREADS];
+    MatrixThreadInfo threadData[NUM_THREADS];
+    int rowsPerThread = SQUARE_MATRIX_SIZE / NUM_THREADS;
+
+    // Create threads for parallel computation
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        threadData[i].A = &A;
+        threadData[i].B = &B;
+        threadData[i].C = &C;
+        threadData[i].firstRow = i * rowsPerThread;
+        threadData[i].lastRow = (i == NUM_THREADS - 1) ? SQUARE_MATRIX_SIZE : (i + 1) * rowsPerThread;
+        pthread_create(&threads[i], NULL, calculateDotProducts, &threadData[i]);
     }
 
-    int A[MAX_SIZE][MAX_SIZE], B[MAX_SIZE][MAX_SIZE], C[MAX_SIZE][MAX_SIZE];
+    // Wait for all threads to finish
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        pthread_join(threads[i], NULL);
+    }
 
-    // Initialize matrices A and B with random values
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            A[i][j] = dis(gen);
-            B[i][j] = dis(gen);
+    // Stop timing the matrix multiplication process
+    auto stop = chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::microseconds>(stop - start);
+
+    // Output the time taken for matrix multiplication
+    cout << endl << "Execution time for matrix multiplication: " << duration.count() << " microseconds" << endl;
+
+    // Write the result matrix to a file
+    ofstream outFile("result.txt");
+    if (outFile.is_open()) {
+        for (int i = 0; i < SQUARE_MATRIX_SIZE; ++i) {
+            for (int j = 0; j < SQUARE_MATRIX_SIZE; ++j) {
+                outFile << C[i][j] << " ";
+            }
+            outFile << endl;
         }
+        outFile.close();
+        cout << "The resulting matrix has been written to 'result.txt'" << endl;
+    } else {
+        cerr << "Unable to open file 'result.txt'" << endl;
     }
-
-    // Thread data and thread creation
-    pthread_t threads[4];
-    ThreadData thread_data[4];
-    
-    auto start = high_resolution_clock::now();
-
-    // Create threads
-    for (int i = 0; i < 4; ++i) {
-        thread_data[i].thread_id = i;
-        thread_data[i].N = N;
-        thread_data[i].A = A;
-        thread_data[i].B = B;
-        thread_data[i].C = C;
-
-        pthread_create(&threads[i], nullptr, multiplyMatrices, &thread_data[i]);
-    }
-
-    // Join threads
-    for (int i = 0; i < 4; ++i) {
-        pthread_join(threads[i], nullptr);
-    }
-
-    auto stop = high_resolution_clock::now();
-    auto duration = duration_cast<nanoseconds>(stop - start);
-
-    // Write matrix C to the file
-    ofstream outputFile("output.txt");
-    if (!outputFile.is_open()) {
-        cout << "Unable to open file for writing!";
-        return 1;
-    }
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            outputFile << C[i][j] << " ";
-        }
-        outputFile << endl;
-    }
-    outputFile.close();
-
-    cout << "Matrix multiplication result has been written to output.txt\n";
-    cout << "Execution time (excluding initialization and file writing): " << duration.count() << " nanoseconds\n";
 
     return 0;
 }
