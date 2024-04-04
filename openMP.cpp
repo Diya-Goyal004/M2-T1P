@@ -1,22 +1,42 @@
 #include <iostream>
 #include <fstream>
-#include <random> // Use <random> for random number generation
-#include <chrono> // Include the chrono library for time measurements
-#include <omp.h> // Include OpenMP for parallelization
+#include <vector>
+#include <cstdlib> 
+#include <chrono>
+#include <omp.h> // OpenMP header
 
 using namespace std;
-using namespace std::chrono;
 
-const int MAX_SIZE = 100;
+const int SQUARE_MATRIX_SIZE = 1000; // Size of the square matrices
+int NUM_THREADS = 16; // Global variable to control the number of threads
 
-// Function to multiply matrices A and B and store the result in matrix C
-void multiplyMatrices(int A[][MAX_SIZE], int B[][MAX_SIZE], int C[][MAX_SIZE], int N) {
-    // Parallelize the outer loop using OpenMP
+// Function to generate random values for a matrix
+void generateRandomMatrix(vector<vector<int>>& matrix) {
     #pragma omp parallel for
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            C[i][j] = 0;
-            for (int k = 0; k < N; ++k) {
+    for (int row = 0; row < SQUARE_MATRIX_SIZE; ++row) {
+        for (int col = 0; col < SQUARE_MATRIX_SIZE; ++col) {
+            // Generating random numbers between 0 and 99
+            matrix[row][col] = rand() % 100; 
+        }
+    }
+}
+
+// Function to display a matrix
+void displayMatrix(const vector<vector<int>>& matrix) {
+    for (int row = 0; row < SQUARE_MATRIX_SIZE; ++row) {
+        for (int col = 0; col < SQUARE_MATRIX_SIZE; ++col) {
+            cout << matrix[row][col] << " ";
+        }
+        cout << endl;
+    }
+}
+
+// Function to perform matrix multiplication
+void multiplyMatrices(const vector<vector<int>>& A, const vector<vector<int>>& B, vector<vector<int>>& C) {
+    #pragma omp parallel for collapse(2)
+    for (int i = 0; i < SQUARE_MATRIX_SIZE; ++i) {
+        for (int j = 0; j < SQUARE_MATRIX_SIZE; ++j) {
+            for (int k = 0; k < SQUARE_MATRIX_SIZE; ++k) {
                 C[i][j] += A[i][k] * B[k][j];
             }
         }
@@ -24,60 +44,51 @@ void multiplyMatrices(int A[][MAX_SIZE], int B[][MAX_SIZE], int C[][MAX_SIZE], i
 }
 
 int main() {
-    // Use random_device to seed the random number generator for better quality randomness
-    random_device rd;
-    mt19937 gen(rd());
-    uniform_int_distribution<> dis(0, 9); // Distribution from 0 to 9
+    // Initialize matrices A, B, and C
+    vector<vector<int>> A(SQUARE_MATRIX_SIZE, vector<int>(SQUARE_MATRIX_SIZE));
+    vector<vector<int>> B(SQUARE_MATRIX_SIZE, vector<int>(SQUARE_MATRIX_SIZE));
+    vector<vector<int>> C(SQUARE_MATRIX_SIZE, vector<int>(SQUARE_MATRIX_SIZE, 0)); // Initialize C with zeros
 
-    int N;
-    cout << "Enter the size of the matrices (N): ";
-    cin >> N;
+    // Generate random values for matrices A and B
+    generateRandomMatrix(A);
+    generateRandomMatrix(B);
 
-    // Check if N is within the maximum size
-    if (N <= 0 || N > MAX_SIZE) {
-        cout << "Invalid size entered!";
-        return 1;
-    }
+    // Display matrices A and B
+    cout << "Matrix A:" << endl;
+    displayMatrix(A);
+    cout << endl << "Matrix B:" << endl;
+    displayMatrix(B);
 
-    int A[MAX_SIZE][MAX_SIZE], B[MAX_SIZE][MAX_SIZE], C[MAX_SIZE][MAX_SIZE];
+    //NUM_THREADS = 4;
+    omp_set_num_threads(NUM_THREADS); // Set the number of threads for OpenMP
 
-    // Initialize matrices A and B with random values
-    #pragma omp parallel for collapse(2)
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            A[i][j] = dis(gen); // Generate random value between 0 and 9
-            B[i][j] = dis(gen); // Generate random value between 0 and 9
+    // Start timing the matrix multiplication process
+    auto start = chrono::high_resolution_clock::now();
+
+    // Perform matrix multiplication in parallel
+    multiplyMatrices(A, B, C);
+
+    // Stop timing the matrix multiplication process
+    auto stop = chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::microseconds>(stop - start);
+
+    // Output the time taken for matrix multiplication
+    cout << endl << "Execution time for matrix multiplication using " << NUM_THREADS << " threads: " << duration.count() << " microseconds" << endl;
+
+    // Write the result matrix to a file
+    ofstream outFile("result_openmp.txt");
+    if (outFile.is_open()) {
+        for (int i = 0; i < SQUARE_MATRIX_SIZE; ++i) {
+            for (int j = 0; j < SQUARE_MATRIX_SIZE; ++j) {
+                outFile << C[i][j] << " ";
+            }
+            outFile << endl;
         }
+        outFile.close();
+        cout << "The resulting matrix has been written to 'result_openmp.txt'" << endl;
+    } else {
+        cerr << "Unable to open file 'result_openmp.txt'" << endl;
     }
-
-    // Measure execution time in nanoseconds
-    auto start = high_resolution_clock::now(); // Start clock
-
-    // Perform matrix multiplication
-    multiplyMatrices(A, B, C, N);
-
-    auto stop = high_resolution_clock::now(); // Stop clock
-    auto duration = duration_cast<nanoseconds>(stop - start); // Calculate duration
-
-    // Write the result to a file
-    ofstream outputFile("output.txt");
-    if (!outputFile.is_open()) {
-        cout << "Unable to open file for writing!";
-        return 1;
-    }
-
-    // Write matrix C to the file
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            outputFile << C[i][j] << " ";
-        }
-        outputFile << endl;
-    }
-
-    outputFile.close();
-
-    cout << "Matrix multiplication result has been written to output.txt\n";
-    cout << "Execution time (excluding initialization and file writing): " << duration.count() << " nanoseconds\n";
 
     return 0;
 }
